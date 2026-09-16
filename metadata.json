@@ -1,0 +1,6 @@
+{
+  "name": "CLEAR EXPRESS 555",
+  "description": "Anything. Anywhere. Fast. Fast, secure and reliable delivery for packages, documents, e-commerce orders and businesses across Rwanda and internationally.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

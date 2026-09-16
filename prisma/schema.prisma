@@ -1,0 +1,394 @@
+// Clear Express 555 - Prisma Database Schema
+// Database: PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  DISPATCHER
+  DRIVER
+  CUSTOMER
+  BUSINESS_CUSTOMER
+  SUPPORT
+}
+
+enum OrderStatus {
+  PENDING
+  PAYMENT_PENDING
+  PAID
+  DRIVER_SEARCHING
+  DRIVER_ASSIGNED
+  DRIVER_AT_PICKUP
+  PACKAGE_PICKED_UP
+  IN_TRANSIT
+  NEAR_DESTINATION
+  DELIVERED
+  FAILED_DELIVERY
+  RETURNING
+  RETURNED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  MOBILE_MONEY
+  CARD
+  CASH_ON_DELIVERY
+  BUSINESS_ACCOUNT
+}
+
+enum VehicleType {
+  MOTORCYCLE
+  CAR
+  VAN
+}
+
+enum PackageType {
+  DOCUMENT
+  SMALL
+  MEDIUM
+  LARGE
+  FRAGILE
+}
+
+enum DeliverySpeed {
+  STANDARD
+  EXPRESS
+}
+
+enum DriverStatus {
+  ONLINE
+  OFFLINE
+  BUSY
+  SUSPENDED
+}
+
+enum NotificationChannel {
+  SMS
+  EMAIL
+  PUSH
+  WHATSAPP
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  phone         String         @unique
+  passwordHash  String
+  role          UserRole       @default(CUSTOMER)
+  name          String
+  avatarUrl     String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  customer      Customer?
+  driver        Driver?
+  business      Business?
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+}
+
+model Customer {
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isBusiness   Boolean   @default(false)
+  orders       Order[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  businessId   String?
+  business     Business? @relation(fields: [businessId], references: [id])
+
+  @@index([userId])
+}
+
+model Business {
+  id              String      @id @default(uuid())
+  userId          String      @unique
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName     String
+  tinNumber       String?
+  contactPerson   String
+  creditLimitRwf  Float       @default(1000000)
+  currentSpendRwf Float       @default(0)
+  customers       Customer[]
+  orders          Order[]
+  invoices        Invoice[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model Driver {
+  id               String            @id @default(uuid())
+  userId           String            @unique
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status           DriverStatus      @default(OFFLINE)
+  isApproved       Boolean           @default(false)
+  currentLatitude  Float?
+  currentLongitude Float?
+  lastGpsUpdate    DateTime?
+  rating           Float             @default(5.0)
+  totalDeliveries  Int               @default(0)
+  todayEarningsRwf Float             @default(0)
+  todayKm          Float             @default(0)
+  
+  vehicleId        String?           @unique
+  vehicle          Vehicle?          @relation(fields: [vehicleId], references: [id])
+  orders           Order[]
+  trackingEvents   TrackingEvent[]
+  proofsOfDelivery ProofOfDelivery[]
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([status])
+  @@index([isApproved])
+}
+
+model Vehicle {
+  id          String      @id @default(uuid())
+  type        VehicleType
+  make        String
+  model       String
+  plateNumber String      @unique
+  color       String?
+  year        Int?
+  driver      Driver?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([plateNumber])
+}
+
+model Address {
+  id             String   @id @default(uuid())
+  street         String
+  city           String   @default("Kigali")
+  district       String?
+  landmark       String?
+  latitude       Float
+  longitude      Float
+  contactName    String
+  contactPhone   String
+  
+  pickupOrders   Order[]  @relation("PickupAddress")
+  destOrders     Order[]  @relation("DestAddress")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Package {
+  id          String      @id @default(uuid())
+  type        PackageType
+  weightKg    Float
+  lengthCm    Float?
+  widthCm     Float?
+  heightCm    Float?
+  description String
+  itemCount   Int         @default(1)
+  isFragile   Boolean     @default(false)
+  
+  order       Order?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Order {
+  id                String            @id @default(uuid())
+  trackingNumber    String            @unique
+  status            OrderStatus       @default(PENDING)
+  speed             DeliverySpeed     @default(STANDARD)
+  vehicleType       VehicleType       @default(MOTORCYCLE)
+  
+  distanceKm        Float
+  estimatedMinutes  Int
+  routeGeometryJson String?           // GeoJSON / polyline coordinates
+  
+  baseFeeRwf        Float
+  distanceFeeRwf    Float
+  packageFeeRwf     Float
+  vehicleFeeRwf     Float
+  expressFeeRwf     Float
+  zoneFeeRwf        Float             @default(0)
+  totalFeeRwf       Float
+  
+  otpCode           String            // 4-digit customer verification code
+  notes             String?
+
+  customerId        String
+  customer          Customer          @relation(fields: [customerId], references: [id])
+  
+  businessId        String?
+  business          Business?         @relation(fields: [businessId], references: [id])
+
+  driverId          String?
+  driver            Driver?           @relation(fields: [driverId], references: [id])
+
+  pickupAddressId   String
+  pickupAddress     Address           @relation("PickupAddress", fields: [pickupAddressId], references: [id])
+
+  destAddressId     String
+  destAddress       Address           @relation("DestAddress", fields: [destAddressId], references: [id])
+
+  packageId         String            @unique
+  package           Package           @relation(fields: [packageId], references: [id])
+
+  payments          Payment[]
+  trackingEvents    TrackingEvent[]
+  proofOfDelivery   ProofOfDelivery?
+  invoices          Invoice[]
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([trackingNumber])
+  @@index([status])
+  @@index([customerId])
+  @@index([driverId])
+  @@index([createdAt])
+}
+
+model TrackingEvent {
+  id          String      @id @default(uuid())
+  orderId     String
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driverId    String?
+  driver      Driver?     @relation(fields: [driverId], references: [id])
+  status      OrderStatus
+  title       String
+  description String
+  latitude    Float?
+  longitude   Float?
+  speed       Float?
+  heading     Float?
+  timestamp   DateTime    @default(now())
+
+  @@index([orderId])
+  @@index([timestamp])
+}
+
+model ProofOfDelivery {
+  id                String   @id @default(uuid())
+  orderId           String   @unique
+  order             Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driverId          String
+  driver            Driver   @relation(fields: [driverId], references: [id])
+  recipientName     String
+  otpVerified       Boolean  @default(true)
+  signatureDataUrl  String?
+  photoUrl          String?
+  latitude          Float
+  longitude         Float
+  notes             String?
+  timestamp         DateTime @default(now())
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amountRwf         Float
+  method            PaymentMethod
+  status            PaymentStatus @default(PENDING)
+  providerReference String?
+  phoneNumber       String?
+  paidAt            DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model PricingRule {
+  id          String      @id @default(uuid())
+  vehicleType VehicleType @unique
+  baseFeeRwf  Float
+  pricePerKm  Float
+  docFee      Float       @default(0)
+  smallFee    Float       @default(500)
+  mediumFee   Float       @default(1000)
+  largeFee    Float       @default(2000)
+  fragileFee  Float       @default(1500)
+  expressFee  Float       @default(1000)
+  minimumFee  Float       @default(1000)
+  updatedAt   DateTime    @updatedAt
+}
+
+model DeliveryZone {
+  id                   String   @id @default(uuid())
+  name                 String   @unique
+  code                 String   @unique
+  minimumFeeRwf        Float
+  pricePerKmMultiplier Float   @default(1.0)
+  extraFeeRwf          Float    @default(0)
+  polygonGeoJson       String?
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  orderId       String
+  order         Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  businessId    String?
+  business      Business?     @relation(fields: [businessId], references: [id])
+  amountRwf     Float
+  status        PaymentStatus
+  issuedAt      DateTime      @default(now())
+
+  @@index([invoiceNumber])
+  @@index([orderId])
+}
+
+model Notification {
+  id        String              @id @default(uuid())
+  userId    String
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  channel   NotificationChannel @default(SMS)
+  read      Boolean             @default(false)
+  createdAt DateTime            @default(now())
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([action])
+  @@index([createdAt])
+}
